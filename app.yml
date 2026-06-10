@@ -1,0 +1,9 @@
+command: ["python", "app.py"]
+
+env:
+  - name: DATABRICKS_HOST
+    valueFrom: "databricks_secret"    # or set directly for testing
+  - name: DATABRICKS_TOKEN
+    valueFrom: "databricks_secret"
+  - name: GENIE_SPACE_ID
+    valueFrom: "databricks_secret"

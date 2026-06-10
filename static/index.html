@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Genie Chat</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --border:    #2a2d3a;
+      --accent:    #ff3621;      /* Databricks red */
+      --accent-lo: rgba(255,54,33,.12);
+      --text:      #e8eaf0;
+      --muted:     #7a7f96;
+      --user-bg:   #1f2235;
+      --bot-bg:    #161921;
+      --radius:    12px;
+      --font:      'Inter', system-ui, sans-serif;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+
+    .logo {
+      width: 32px; height: 32px;
+      background: var(--accent);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+
+    header h1 { font-size: 16px; font-weight: 600; letter-spacing: -.2px; }
+    header p  { font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+    .status-dot {
+      margin-left: auto;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 6px #22c55e88;
+    }
+
+    /* ── Chat window ── */
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scroll-behavior: smooth;
+    }
+
+    #chat::-webkit-scrollbar { width: 4px; }
+    #chat::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    /* ── Messages ── */
+    .msg {
+      display: flex;
+      gap: 10px;
+      max-width: 820px;
+      width: 100%;
+      animation: fadeUp .2s ease;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .msg.user  { align-self: flex-end; flex-direction: row-reverse; }
+    .msg.bot   { align-self: flex-start; }
+
+    .avatar {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .msg.user .avatar { background: var(--accent-lo); color: var(--accent); }
+    .msg.bot  .avatar { background: #1e2235; color: #818cf8; }
+
+    .bubble {
+      padding: 12px 16px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      line-height: 1.65;
+      max-width: calc(100% - 44px);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .msg.user .bubble {
+      background: var(--user-bg);
+      border: 1px solid var(--border);
+      border-top-right-radius: 4px;
+    }
+
+    .msg.bot .bubble {
+      background: var(--bot-bg);
+      border: 1px solid var(--border);
+      border-top-left-radius: 4px;
+    }
+
+    /* ── Typing indicator ── */
+    .typing-dots span {
+      display: inline-block;
+      width: 6px; height: 6px;
+      background: var(--muted);
+      border-radius: 50%;
+      margin: 0 2px;
+      animation: bounce 1.2s infinite ease-in-out;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: .2s; }
+    .typing-dots span:nth-child(3) { animation-delay: .4s; }
+
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); }
+      40%           { transform: translateY(-5px); }
+    }
+
+    /* ── Empty state ── */
+    #empty {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      color: var(--muted);
+      text-align: center;
+      padding-bottom: 40px;
+    }
+    #empty .icon { font-size: 40px; margin-bottom: 4px; }
+    #empty h2    { font-size: 17px; font-weight: 600; color: var(--text); }
+    #empty p     { font-size: 13px; max-width: 340px; }
+
+    .pill-row {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      justify-content: center;
+      margin-top: 16px;
+    }
+
+    .pill {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 14px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color .15s, color .15s;
+      color: var(--text);
+    }
+    .pill:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Input bar ── */
+    footer {
+      padding: 16px 20px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      transition: border-color .15s;
+    }
+    .input-row:focus-within { border-color: var(--accent); }
+
+    textarea {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+      resize: none;
+      max-height: 140px;
+      line-height: 1.5;
+    }
+    textarea::placeholder { color: var(--muted); }
+
+    .send-btn {
+      width: 36px; height: 36px;
+      border-radius: 8px;
+      background: var(--accent);
+      border: none;
+      color: #fff;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: opacity .15s, transform .1s;
+      flex-shrink: 0;
+    }
+    .send-btn:hover   { opacity: .88; }
+    .send-btn:active  { transform: scale(.94); }
+    .send-btn:disabled{ opacity: .35; cursor: not-allowed; }
+
+    .send-btn svg { pointer-events: none; }
+
+    .footer-meta {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+      margin-top: 8px;
+    }
+
+    /* ── New conversation button ── */
+    .new-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 12px;
+      border-radius: 6px;
+      padding: 4px 10px;
+      cursor: pointer;
+      margin-left: auto;
+      transition: color .15s, border-color .15s;
+    }
+    .new-btn:hover { color: var(--text); border-color: var(--text); }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header>
+  <div class="logo">✦</div>
+  <div>
+    <h1>Genie Chat</h1>
+    <p>Databricks AI/BI Genie Space</p>
+  </div>
+  <button class="new-btn" onclick="newConversation()">+ New chat</button>
+  <div class="status-dot" title="Connected"></div>
+</header>
+
+<!-- ── Chat area ── -->
+<div id="chat">
+  <div id="empty">
+    <div class="icon">✦</div>
+    <h2>Ask your data anything</h2>
+    <p>Genie will query your connected data source and answer in plain language.</p>
+    <div class="pill-row">
+      <button class="pill" onclick="useSuggestion(this)">Show me total sales this month</button>
+      <button class="pill" onclick="useSuggestion(this)">Which region has the highest revenue?</button>
+      <button class="pill" onclick="useSuggestion(this)">Top 5 products by orders</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Input ── -->
+<footer>
+  <div class="input-row">
+    <textarea
+      id="input"
+      rows="1"
+      placeholder="Ask a question about your data…"
+      onkeydown="handleKey(event)"
+      oninput="autoResize(this)"
+    ></textarea>
+    <button class="send-btn" id="sendBtn" onclick="sendMessage()" title="Send (Enter)">
+      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7"/>
+      </svg>
+    </button>
+  </div>
+  <div class="footer-meta">Powered by Databricks Genie · responses may take a few seconds</div>
+</footer>
+
+<script>
+  let conversationId = null;
+  let isLoading = false;
+
+  // ── Textarea auto-resize ──────────────────────────────────────────────────
+  function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+  }
+
+  // ── Enter to send (Shift+Enter for newline) ───────────────────────────────
+  function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  }
+
+  // ── Suggestion pills ──────────────────────────────────────────────────────
+  function useSuggestion(btn) {
+    document.getElementById('input').value = btn.textContent.trim();
+    autoResize(document.getElementById('input'));
+    sendMessage();
+  }
+
+  // ── New conversation ──────────────────────────────────────────────────────
+  function newConversation() {
+    conversationId = null;
+    const chat = document.getElementById('chat');
+    chat.innerHTML = `
+      <div id="empty">
+        <div class="icon">✦</div>
+        <h2>Ask your data anything</h2>
+        <p>Genie will query your connected data source and answer in plain language.</p>
+        <div class="pill-row">
+          <button class="pill" onclick="useSuggestion(this)">Show me total sales this month</button>
+          <button class="pill" onclick="useSuggestion(this)">Which region has the highest revenue?</button>
+          <button class="pill" onclick="useSuggestion(this)">Top 5 products by orders</button>
+        </div>
+      </div>`;
+  }
+
+  // ── Add message bubble ────────────────────────────────────────────────────
+  function addMessage(text, role) {
+    const empty = document.getElementById('empty');
+    if (empty) empty.remove();
+
+    const chat = document.getElementById('chat');
+    const div  = document.createElement('div');
+    div.className = `msg ${role}`;
+    div.innerHTML = `
+      <div class="avatar">${role === 'user' ? 'U' : '✦'}</div>
+      <div class="bubble">${escapeHtml(text)}</div>`;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+    return div;
+  }
+
+  // ── Typing indicator ──────────────────────────────────────────────────────
+  function addTyping() {
+    const empty = document.getElementById('empty');
+    if (empty) empty.remove();
+
+    const chat = document.getElementById('chat');
+    const div  = document.createElement('div');
+    div.className = 'msg bot';
+    div.id = 'typing';
+    div.innerHTML = `
+      <div class="avatar">✦</div>
+      <div class="bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  function removeTyping() {
+    const t = document.getElementById('typing');
+    if (t) t.remove();
+  }
+
+  // ── Main send ─────────────────────────────────────────────────────────────
+  async function sendMessage() {
+    if (isLoading) return;
+    const input = document.getElementById('input');
+    const question = input.value.trim();
+    if (!question) return;
+
+    isLoading = true;
+    document.getElementById('sendBtn').disabled = true;
+    input.value = '';
+    input.style.height = 'auto';
+
+    addMessage(question, 'user');
+    addTyping();
+
+    try {
+      const res = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, conversation_id: conversationId }),
+      });
+
+      const data = await res.json();
+      removeTyping();
+
+      if (!res.ok) {
+        addMessage(`⚠️ Error: ${data.error || 'Something went wrong.'}`, 'bot');
+      } else {
+        conversationId = data.conversation_id;
+        addMessage(data.answer || '(Empty response)', 'bot');
+      }
+    } catch (err) {
+      removeTyping();
+      addMessage(`⚠️ Network error: ${err.message}`, 'bot');
+    } finally {
+      isLoading = false;
+      document.getElementById('sendBtn').disabled = false;
+      input.focus();
+    }
+  }
+
+  // ── Escape HTML to prevent XSS ────────────────────────────────────────────
+  function escapeHtml(str) {
+    return str
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+</script>
+</body>
+</html>
