@@ -1,9 +1,0 @@
-{
-  "scripts": {
-    "build": "cd frontend && npm install && npm run build",
-    "start": "serve -s frontend/build -l 8000"
-  },
-  "dependencies": {
-    "serve": "^14.2.0"
-  }
-}
