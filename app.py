@@ -61,7 +61,8 @@ def poll_message(conversation_id: str, message_id: str, timeout: int = 120):
                     return {"answer": att["text"]["content"], "status": "COMPLETED"}
                 if att.get("type") == "QUERY":
                     return {"answer": att.get("query", {}).get("description", ""), "status": "COMPLETED"}
-            return {"answer": "(Genie returned no text response)", "status": "COMPLETED"}
+            # Return full raw response so we can see what Genie actually sent back
+            return {"answer": f"[DEBUG] No TEXT/QUERY attachment found.\n\nFull response:\n{data}", "status": "COMPLETED"}
 
         if status in ("FAILED", "CANCELLED"):
             msg = data.get("error", {}).get("message", "Unknown error")
