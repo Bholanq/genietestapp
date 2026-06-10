@@ -6,44 +6,66 @@ from flask import Flask, request, jsonify, send_from_directory
 app = Flask(__name__, static_folder="static")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DATABRICKS_HOST  = os.environ["DATABRICKS_HOST"]          # e.g. https://adb-xxxx.azuredatabricks.net
-DATABRICKS_TOKEN = os.environ["DATABRICKS_TOKEN"]         # Personal Access Token or SP token
-GENIE_SPACE_ID   = os.environ["GENIE_SPACE_ID"]           # Copied from Genie Space URL
+# All of these are automatically injected by Databricks Apps — no manual setup needed.
+_host        = os.environ["DATABRICKS_HOST"]
+DATABRICKS_HOST = _host if _host.startswith("https://") else f"https://{_host}"
+CLIENT_ID    = os.environ["DATABRICKS_CLIENT_ID"]
+CLIENT_SECRET= os.environ["DATABRICKS_CLIENT_SECRET"]
+GENIE_SPACE_ID = "01f15ff3c23e18e6b043e81ab662dacc"   # ← your space ID, hardcoded
 
-HEADERS = {
-    "Authorization": f"Bearer {DATABRICKS_TOKEN}",
-    "Content-Type": "application/json",
-}
+# ── OAuth M2M token (cached) ──────────────────────────────────────────────────
+_token_cache = {"token": None, "expires_at": 0}
+
+def get_token() -> str:
+    """Fetch a fresh OAuth token using the injected client credentials, with caching."""
+    now = time.time()
+    if _token_cache["token"] and now < _token_cache["expires_at"] - 30:
+        return _token_cache["token"]
+
+    resp = requests.post(
+        f"{DATABRICKS_HOST}/oidc/v1/token",
+        data={
+            "grant_type":    "client_credentials",
+            "scope":         "all-apis",
+            "client_id":     CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+        },
+        timeout=15,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    _token_cache["token"]      = data["access_token"]
+    _token_cache["expires_at"] = now + data.get("expires_in", 3600)
+    return _token_cache["token"]
+
+def headers() -> dict:
+    return {"Authorization": f"Bearer {get_token()}", "Content-Type": "application/json"}
 
 BASE_URL = f"{DATABRICKS_HOST}/api/2.0/genie/spaces/{GENIE_SPACE_ID}"
 
 
 # ── Helper: poll until message is complete ────────────────────────────────────
 def poll_message(conversation_id: str, message_id: str, timeout: int = 120):
-    """Poll Genie until the message status is COMPLETED or FAILED."""
-    url = f"{BASE_URL}/conversations/{conversation_id}/messages/{message_id}"
+    url      = f"{BASE_URL}/conversations/{conversation_id}/messages/{message_id}"
     deadline = time.time() + timeout
 
     while time.time() < deadline:
-        resp = requests.get(url, headers=HEADERS, timeout=30)
+        resp = requests.get(url, headers=headers(), timeout=30)
         resp.raise_for_status()
-        data = resp.json()
+        data   = resp.json()
         status = data.get("status", "")
 
         if status == "COMPLETED":
-            # Extract the text result from the attachments
-            for attachment in data.get("attachments", []):
-                if attachment.get("type") == "TEXT":
-                    return {"answer": attachment["text"]["content"], "status": "COMPLETED"}
-                if attachment.get("type") == "QUERY":
-                    query_att = attachment.get("query", {})
-                    description = query_att.get("description", "")
-                    return {"answer": description, "status": "COMPLETED"}
-            return {"answer": "(No text response returned by Genie)", "status": "COMPLETED"}
+            for att in data.get("attachments", []):
+                if att.get("type") == "TEXT":
+                    return {"answer": att["text"]["content"], "status": "COMPLETED"}
+                if att.get("type") == "QUERY":
+                    return {"answer": att.get("query", {}).get("description", ""), "status": "COMPLETED"}
+            return {"answer": "(Genie returned no text response)", "status": "COMPLETED"}
 
         if status in ("FAILED", "CANCELLED"):
-            error_msg = data.get("error", {}).get("message", "Unknown error")
-            return {"answer": f"Genie error: {error_msg}", "status": status}
+            msg = data.get("error", {}).get("message", "Unknown error")
+            return {"answer": f"Genie error: {msg}", "status": status}
 
         time.sleep(2)
 
@@ -58,11 +80,7 @@ def index():
 
 @app.route("/api/ask", methods=["POST"])
 def ask():
-    """
-    Body: { "question": "...", "conversation_id": "<optional>" }
-    Returns: { "answer": "...", "conversation_id": "..." }
-    """
-    body = request.get_json(force=True)
+    body            = request.get_json(force=True)
     question        = body.get("question", "").strip()
     conversation_id = body.get("conversation_id")
 
@@ -70,25 +88,12 @@ def ask():
         return jsonify({"error": "question is required"}), 400
 
     try:
-        # ── Start or continue a conversation ──────────────────────────────────
         if conversation_id:
-            # Continue existing conversation
-            msg_url = f"{BASE_URL}/conversations/{conversation_id}/messages"
-            msg_resp = requests.post(
-                msg_url,
-                headers=HEADERS,
-                json={"content": question},
-                timeout=30,
-            )
+            url      = f"{BASE_URL}/conversations/{conversation_id}/messages"
+            msg_resp = requests.post(url, headers=headers(), json={"content": question}, timeout=30)
         else:
-            # Start a new conversation
-            msg_url = f"{BASE_URL}/start-conversation"
-            msg_resp = requests.post(
-                msg_url,
-                headers=HEADERS,
-                json={"content": question},
-                timeout=30,
-            )
+            url      = f"{BASE_URL}/start-conversation"
+            msg_resp = requests.post(url, headers=headers(), json={"content": question}, timeout=30)
 
         msg_resp.raise_for_status()
         msg_data = msg_resp.json()
@@ -97,9 +102,8 @@ def ask():
         message_id      = msg_data.get("message_id")      or msg_data.get("message", {}).get("id")
 
         if not conversation_id or not message_id:
-            return jsonify({"error": "Unexpected response from Genie API", "raw": msg_data}), 500
+            return jsonify({"error": "Unexpected Genie API response", "raw": msg_data}), 500
 
-        # ── Poll for result ───────────────────────────────────────────────────
         result = poll_message(conversation_id, message_id)
         result["conversation_id"] = conversation_id
         return jsonify(result)
@@ -111,4 +115,4 @@ def ask():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000, debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=False)
