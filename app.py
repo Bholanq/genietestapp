@@ -46,43 +46,63 @@ BASE_URL = f"{DATABRICKS_HOST}/api/2.0/genie/spaces/{GENIE_SPACE_ID}"
 
 # ── Helper: poll until message is complete ────────────────────────────────────
 def poll_message(conversation_id: str, message_id: str, timeout: int = 120):
-    url      = f"{BASE_URL}/conversations/{conversation_id}/messages/{message_id}"
+    url = f"{BASE_URL}/conversations/{conversation_id}/messages/{message_id}"
     deadline = time.time() + timeout
 
     while time.time() < deadline:
         resp = requests.get(url, headers=headers(), timeout=30)
         resp.raise_for_status()
-        data   = resp.json()
+        data = resp.json()
+
         status = data.get("status", "")
 
         if status == "COMPLETED":
+
+            texts = []
+
             for att in data.get("attachments", []):
-                if att.get("type") == "TEXT":
-                    return {"answer": att["text"]["content"], "status": "COMPLETED"}
-                if att.get("type") == "QUERY":
-                    return {"answer": att.get("query", {}).get("description", ""), "status": "COMPLETED"}
-            # Return full raw response so we can see what Genie actually sent back
-            return {"answer": f"[DEBUG] No TEXT/QUERY attachment found.\n\nFull response:\n{data}", "status": "COMPLETED"}
+
+                # Collect all text attachments
+                if "text" in att:
+                    texts.append(att["text"]["content"])
+
+            # Return all text responses joined together
+            if texts:
+                return {
+                    "answer": "\n\n".join(texts),
+                    "status": "COMPLETED"
+                }
+
+            # Fallback if no text attachments exist
+            return {
+                "answer": "No text response found from Genie.",
+                "status": "COMPLETED"
+            }
 
         if status in ("FAILED", "CANCELLED"):
             msg = data.get("error", {}).get("message", "Unknown error")
-            return {"answer": f"Genie error: {msg}", "status": status}
+            return {
+                "answer": f"Genie error: {msg}",
+                "status": status
+            }
 
         time.sleep(2)
 
-    return {"answer": "Timed out waiting for Genie response.", "status": "TIMEOUT"}
-
+    return {
+        "answer": "Timed out waiting for Genie response.",
+        "status": "TIMEOUT"
+    }
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
 
-
 @app.route("/api/ask", methods=["POST"])
 def ask():
-    body            = request.get_json(force=True)
-    question        = body.get("question", "").strip()
+    body = request.get_json(force=True)
+
+    question = body.get("question", "").strip()
     conversation_id = body.get("conversation_id")
 
     if not question:
@@ -90,30 +110,59 @@ def ask():
 
     try:
         if conversation_id:
-            url      = f"{BASE_URL}/conversations/{conversation_id}/messages"
-            msg_resp = requests.post(url, headers=headers(), json={"content": question}, timeout=30)
+            url = f"{BASE_URL}/conversations/{conversation_id}/messages"
+
+            msg_resp = requests.post(
+                url,
+                headers=headers(),
+                json={"content": question},
+                timeout=30
+            )
         else:
-            url      = f"{BASE_URL}/start-conversation"
-            msg_resp = requests.post(url, headers=headers(), json={"content": question}, timeout=30)
+            url = f"{BASE_URL}/start-conversation"
+
+            msg_resp = requests.post(
+                url,
+                headers=headers(),
+                json={"content": question},
+                timeout=30
+            )
 
         msg_resp.raise_for_status()
         msg_data = msg_resp.json()
 
-        conversation_id = msg_data.get("conversation_id") or msg_data.get("conversation", {}).get("id")
-        message_id      = msg_data.get("message_id")      or msg_data.get("message", {}).get("id")
+        conversation_id = (
+            msg_data.get("conversation_id")
+            or msg_data.get("conversation", {}).get("id")
+        )
+
+        message_id = (
+            msg_data.get("message_id")
+            or msg_data.get("message", {}).get("id")
+        )
 
         if not conversation_id or not message_id:
-            return jsonify({"error": "Unexpected Genie API response", "raw": msg_data}), 500
+            return jsonify({
+                "error": "Unexpected Genie API response",
+                "raw": msg_data
+            }), 500
 
         result = poll_message(conversation_id, message_id)
-        result["conversation_id"] = conversation_id
-        return jsonify(result)
+
+        return jsonify({
+            "answer": result["answer"],
+            "status": result["status"],
+            "conversation_id": conversation_id
+        })
 
     except requests.HTTPError as e:
-        return jsonify({"error": str(e), "detail": e.response.text}), e.response.status_code
+        return jsonify({
+            "error": str(e),
+            "detail": e.response.text
+        }), e.response.status_code
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=False)
